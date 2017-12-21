@@ -118,3 +118,25 @@
 (expect-with-engine :bigquery
   "UTC"
   (tu/db-timezone-id))
+
+
+;; make sure that BigQuery properly aliases the names generated for Join Tables. It's important to include the name of
+;; the dataset along, e.g. `test_data.categories__via__category_id` rather than just
+;; `categories__via__category_id`, which is what the other SQL databases do. (#4218)
+(expect-with-engine :bigquery
+  (str "SELECT count(*) AS [count],"
+       " [test_data.categories__via__category_id.name] AS [test_data.categories__via__category_id.name] "
+       "FROM [test_data.venues] "
+       "LEFT JOIN [test_data.categories] [test_data.categories__via__category_id]"
+       " ON [test_data.venues.category_id] = [test_data.categories__via__category_id.id] "
+       "GROUP BY [test_data.categories__via__category_id.name] "
+       "ORDER BY [test_data.categories__via__category_id.name] ASC")
+  (tu/with-temp-vals-in-db 'Field (data/id :venues :category_id) {:fk_target_field_id (data/id :categories :id)
+                                                                  :special_type       "type/FK"}
+    (let [results (qp/process-query
+                    {:database (data/id)
+                     :type     "query"
+                     :query    {:source-table (data/id :venues)
+                                :aggregation  [:count]
+                                :breakout     [[:fk-> (data/id :venues :category_id) (data/id :categories :name)]]}})]
+      (get-in results [:data :native_form :query] results))))
